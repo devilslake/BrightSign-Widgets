@@ -4,26 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>tastylive – Live</title>
-
-  <!--
-  ═══════════════════════════════════════════════════════════
-   SETUP: YouTube Data API Key  (one-time, ~2 minutes)
-  ═══════════════════════════════════════════════════════════
-   1. Go to https://console.cloud.google.com/
-   2. Create a project (or pick an existing one)
-   3. APIs & Services → Enable APIs → search "YouTube Data API v3" → Enable
-   4. Credentials → Create Credentials → API Key → Copy it
-   5. Paste your key below, replacing AIzaSyBVaA3g96M5264PZ2gxmQ2lqH4RuEYDD-I
-
-   Free quota: 10,000 requests/day — plenty for digital signage.
-  ═══════════════════════════════════════════════════════════
-  -->
   <script>
     const YT_API_KEY    = 'AIzaSyBVaA3g96M5264PZ2gxmQ2lqH4RuEYDD-I';
     const YT_CHANNEL_ID = 'UCLJiSMXJ9K-1AOTqIqdXJgQ'; // tastylive
-    const REFRESH_MIN   = 5;
+    // Uploads playlist = channel ID with UC→UU
+    const YT_PLAYLIST   = 'UULJiSMXJ9K-1AOTqIqdXJgQ';
+    const REFRESH_MIN   = 3;
   </script>
-
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Bebas+Neue&display=swap" rel="stylesheet">
   <style>
@@ -40,10 +27,9 @@
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
       font-family:'IBM Plex Mono',monospace;color:var(--text)}
-
     .hidden{display:none!important}
 
-    /* ── LIVE ── */
+    /* LIVE */
     #live-view{position:fixed;inset:0;bottom:32px;display:flex;flex-direction:column}
     .hud{display:flex;align-items:center;justify-content:space-between;
       padding:0 20px;background:rgba(7,10,13,.97);
@@ -57,15 +43,17 @@
       animation:pulse 1.4s ease-in-out infinite}
     .channel-name{font-family:'Bebas Neue',sans-serif;font-size:22px;
       letter-spacing:.06em;color:var(--green)}
+    .show-title{font-size:12px;color:var(--muted);letter-spacing:.06em;
+      max-width:600px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .clock{font-size:13px;color:var(--muted);letter-spacing:.08em}
     .clock span{color:var(--text)}
     #player-wrap{flex:1;position:relative;background:#000}
     #player-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:none}
-    #player-wrap::after{content:'';position:absolute;inset:0;pointer-events:none;
-      z-index:5;background:repeating-linear-gradient(to bottom,
+    #player-wrap::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:5;
+      background:repeating-linear-gradient(to bottom,
         transparent 0,transparent 3px,rgba(0,0,0,.07) 3px,rgba(0,0,0,.07) 4px)}
 
-    /* ── OFF-AIR ── */
+    /* OFF-AIR */
     #offair-view{position:fixed;inset:0;bottom:32px;display:flex;
       align-items:center;justify-content:center;background:var(--bg)}
     .offair-grid{position:absolute;inset:0;opacity:.4;
@@ -82,7 +70,8 @@
       background:var(--surface);position:relative}
     .schedule-block .lbl{position:absolute;top:-10px;left:20px;font-size:10px;
       letter-spacing:.18em;color:var(--muted);background:var(--surface);padding:0 8px}
-    .corner{position:absolute;width:22px;height:22px;border-color:var(--green-dim);border-style:solid}
+    .corner{position:absolute;width:22px;height:22px;
+      border-color:var(--green-dim);border-style:solid}
     .corner.tl{top:0;left:0;border-width:2px 0 0 2px}
     .corner.tr{top:0;right:0;border-width:2px 2px 0 0}
     .corner.bl{bottom:0;left:0;border-width:0 0 2px 2px}
@@ -97,7 +86,7 @@
     .time-card .t{font-size:28px;font-weight:600;color:var(--text);letter-spacing:.04em}
     .time-card .tz{font-size:10px;color:var(--muted);letter-spacing:.14em;margin-top:2px}
 
-    /* ── LOADING ── */
+    /* LOADING */
     #loading-view{position:fixed;inset:0;bottom:32px;display:flex;
       align-items:center;justify-content:center;background:var(--bg);
       flex-direction:column;gap:16px}
@@ -105,7 +94,7 @@
       border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite}
     .loading-text{font-size:11px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
 
-    /* ── TICKER ── */
+    /* TICKER */
     .ticker-wrap{position:fixed;bottom:0;left:0;right:0;height:32px;
       background:var(--surface);border-top:1px solid var(--border);
       overflow:hidden;display:flex;align-items:center;z-index:20}
@@ -138,6 +127,7 @@
       <div class="hud-left">
         <div class="live-badge"><div class="live-dot"></div> LIVE</div>
         <div class="channel-name">tastylive</div>
+        <div class="show-title" id="show-title"></div>
       </div>
       <div class="hud-right">
         <div class="clock">CT &nbsp;<span id="hud-clock">--:--:--</span></div>
@@ -196,7 +186,7 @@
       {sym:'NVDA',val:'111.42',   chg:'+1.34%',dir:'up'},
       {sym:'TSLA',val:'287.91',   chg:'-0.88%',dir:'dn'},
     ];
-    document.getElementById('ticker').innerHTML =
+    document.getElementById('ticker').innerHTML=
       [...td,...td].map(d=>
         `<span class="ticker-item"><span class="sym">${d.sym}</span>${d.val}&nbsp;<span class="${d.dir}">${d.chg}</span></span>`+
         `<span class="ticker-item" style="color:var(--border)">·</span>`
@@ -205,43 +195,88 @@
     // Clock
     const getCT=()=>new Date(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}));
     const pad=n=>String(n).padStart(2,'0');
-    const fmt=(d,full)=>{let h=d.getHours(),m=d.getMinutes(),s=d.getSeconds(),a=h>=12?'PM':'AM';
-      h=h%12||12; return full?`${pad(h)}:${pad(m)}:${pad(s)} ${a}`:`${h}:${pad(m)} ${a}`};
+    const fmtFull=d=>{let h=d.getHours(),m=d.getMinutes(),s=d.getSeconds(),a=h>=12?'PM':'AM';
+      h=h%12||12;return`${pad(h)}:${pad(m)}:${pad(s)} ${a}`};
+    const fmtShort=d=>{let h=d.getHours(),m=d.getMinutes(),a=h>=12?'PM':'AM';
+      h=h%12||12;return`${h}:${pad(m)} ${a}`};
     setInterval(()=>{
       const n=getCT();
-      document.getElementById('hud-clock').textContent=fmt(n,true);
-      document.getElementById('offair-clock').textContent=fmt(n,false);
+      document.getElementById('hud-clock').textContent=fmtFull(n);
+      document.getElementById('offair-clock').textContent=fmtShort(n);
     },1000);
 
     // Views
-    const views=['loading-view','live-view','offair-view'];
-    const showView=id=>views.forEach(v=>document.getElementById(v).classList.toggle('hidden',v!==id));
+    const showView=id=>['loading-view','live-view','offair-view']
+      .forEach(v=>document.getElementById(v).classList.toggle('hidden',v!==id));
 
-    // YouTube API
-    async function fetchLiveVideoId(){
-      if(!YT_API_KEY||YT_API_KEY==='AIzaSyBVaA3g96M5264PZ2gxmQ2lqH4RuEYDD-I'){
-        console.warn('Add your YouTube API key to this file.');return null;}
-      try{
-        const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${YT_CHANNEL_ID}&type=video&eventType=live&key=${YT_API_KEY}`);
-        const d=await r.json();
-        return d.items&&d.items.length?d.items[0].id.videoId:null;
-      }catch(e){console.error(e);return null;}
+    // -----------------------------------------------------------
+    // Reliable live detection:
+    // Step 1 – get the 8 most recent uploads from the channel playlist
+    // Step 2 – ask the videos endpoint which of those is currently live
+    //          (liveStreamingDetails.actualEndTime absent = still live)
+    // -----------------------------------------------------------
+    async function fetchLiveVideoId() {
+      try {
+        // Step 1: recent uploads
+        const plUrl = `https://www.googleapis.com/youtube/v3/playlistItems`
+          + `?part=snippet&playlistId=${YT_PLAYLIST}&maxResults=8&key=${YT_API_KEY}`;
+        const plRes  = await fetch(plUrl);
+        const plData = await plRes.json();
+
+        if (!plData.items || plData.items.length === 0) return null;
+
+        const videoIds = plData.items
+          .map(i => i.snippet.resourceId.videoId)
+          .join(',');
+
+        // Step 2: check live status
+        const vUrl = `https://www.googleapis.com/youtube/v3/videos`
+          + `?part=snippet,liveStreamingDetails&id=${videoIds}&key=${YT_API_KEY}`;
+        const vRes  = await fetch(vUrl);
+        const vData = await vRes.json();
+
+        if (!vData.items) return null;
+
+        for (const video of vData.items) {
+          const lsd = video.liveStreamingDetails;
+          // Has live details, has started, has NOT ended = currently live
+          if (lsd && lsd.actualStartTime && !lsd.actualEndTime) {
+            return { id: video.id, title: video.snippet.title };
+          }
+        }
+        return null;
+      } catch(e) {
+        console.error('YouTube API error:', e);
+        return null;
+      }
     }
 
-    async function checkStream(){
-      showView('loading-view');
-      const id=await fetchLiveVideoId();
-      if(id){
-        document.getElementById('yt-iframe').src=
-          `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3`;
+    let currentVideoId = null;
+
+    async function checkStream() {
+      // Only show spinner on first load
+      if (!currentVideoId) showView('loading-view');
+
+      const result = await fetchLiveVideoId();
+
+      if (result) {
+        // Only swap the iframe if the video changed (avoids interrupting playback)
+        if (result.id !== currentVideoId) {
+          currentVideoId = result.id;
+          document.getElementById('yt-iframe').src =
+            `https://www.youtube.com/embed/${result.id}`
+            + `?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3`;
+          document.getElementById('show-title').textContent = result.title;
+        }
         showView('live-view');
-      }else{
+      } else {
+        currentVideoId = null;
         showView('offair-view');
       }
     }
 
     checkStream();
-    setInterval(checkStream, REFRESH_MIN*60*1000);
+    setInterval(checkStream, REFRESH_MIN * 60 * 1000);
   </script>
 </body>
 </html>
