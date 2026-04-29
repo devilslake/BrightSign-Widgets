@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tastylive – Live</title>
+
+  <!--
+  ═══════════════════════════════════════════════════════════
+   SETUP: YouTube Data API Key  (one-time, ~2 minutes)
+  ═══════════════════════════════════════════════════════════
+   1. Go to https://console.cloud.google.com/
+   2. Create a project (or pick an existing one)
+   3. APIs & Services → Enable APIs → search "YouTube Data API v3" → Enable
+   4. Credentials → Create Credentials → API Key → Copy it
+   5. Paste your key below, replacing AIzaSyBVaA3g96M5264PZ2gxmQ2lqH4RuEYDD-I
+
+   Free quota: 10,000 requests/day — plenty for digital signage.
+  ═══════════════════════════════════════════════════════════
+  -->
+  <script>
+    const YT_API_KEY    = 'AIzaSyBVaA3g96M5264PZ2gxmQ2lqH4RuEYDD-I';
+    const YT_CHANNEL_ID = 'UCLJiSMXJ9K-1AOTqIqdXJgQ'; // tastylive
+    const REFRESH_MIN   = 5;
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:    #00ff88;
+      --green-dim:#00c96a;
+      --red:      #ff3b5c;
+      --bg:       #070a0d;
+      --surface:  #0d1117;
+      --border:   #1a2332;
+      --text:     #c8d8e8;
+      --muted:    #4a6070;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
+      font-family:'IBM Plex Mono',monospace;color:var(--text)}
+
+    .hidden{display:none!important}
+
+    /* ── LIVE ── */
+    #live-view{position:fixed;inset:0;bottom:32px;display:flex;flex-direction:column}
+    .hud{display:flex;align-items:center;justify-content:space-between;
+      padding:0 20px;background:rgba(7,10,13,.97);
+      border-bottom:1px solid var(--border);flex-shrink:0;height:48px;z-index:10}
+    .hud-left{display:flex;align-items:center;gap:14px}
+    .hud-right{display:flex;align-items:center;gap:20px}
+    .live-badge{display:flex;align-items:center;gap:7px;background:var(--red);
+      color:#fff;font-size:11px;font-weight:600;letter-spacing:.12em;padding:4px 10px;
+      clip-path:polygon(6px 0%,100% 0%,calc(100% - 6px) 100%,0% 100%)}
+    .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;
+      animation:pulse 1.4s ease-in-out infinite}
+    .channel-name{font-family:'Bebas Neue',sans-serif;font-size:22px;
+      letter-spacing:.06em;color:var(--green)}
+    .clock{font-size:13px;color:var(--muted);letter-spacing:.08em}
+    .clock span{color:var(--text)}
+    #player-wrap{flex:1;position:relative;background:#000}
+    #player-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:none}
+    #player-wrap::after{content:'';position:absolute;inset:0;pointer-events:none;
+      z-index:5;background:repeating-linear-gradient(to bottom,
+        transparent 0,transparent 3px,rgba(0,0,0,.07) 3px,rgba(0,0,0,.07) 4px)}
+
+    /* ── OFF-AIR ── */
+    #offair-view{position:fixed;inset:0;bottom:32px;display:flex;
+      align-items:center;justify-content:center;background:var(--bg)}
+    .offair-grid{position:absolute;inset:0;opacity:.4;
+      background-image:linear-gradient(var(--border) 1px,transparent 1px),
+        linear-gradient(90deg,var(--border) 1px,transparent 1px);
+      background-size:60px 60px}
+    .offair-content{position:relative;z-index:2;text-align:center;
+      display:flex;flex-direction:column;align-items:center;gap:28px}
+    .offair-logo{font-family:'Bebas Neue',sans-serif;font-size:96px;
+      letter-spacing:.04em;line-height:1;color:var(--green)}
+    .offair-status{font-size:12px;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+    .offair-status .blink{color:var(--green);animation:blink 2s step-end infinite}
+    .schedule-block{border:1px solid var(--border);padding:20px 36px;
+      background:var(--surface);position:relative}
+    .schedule-block .lbl{position:absolute;top:-10px;left:20px;font-size:10px;
+      letter-spacing:.18em;color:var(--muted);background:var(--surface);padding:0 8px}
+    .corner{position:absolute;width:22px;height:22px;border-color:var(--green-dim);border-style:solid}
+    .corner.tl{top:0;left:0;border-width:2px 0 0 2px}
+    .corner.tr{top:0;right:0;border-width:2px 2px 0 0}
+    .corner.bl{bottom:0;left:0;border-width:0 0 2px 2px}
+    .corner.br{bottom:0;right:0;border-width:0 2px 2px 0}
+    .schedule-row{display:flex;align-items:center;justify-content:space-between;
+      gap:40px;padding:7px 0;font-size:13px;border-bottom:1px solid var(--border)}
+    .schedule-row:last-child{border-bottom:none}
+    .schedule-row .day{color:var(--muted);width:130px}
+    .schedule-row .time{color:var(--green);font-weight:600;text-align:right}
+    .time-card{position:absolute;top:20px;right:24px;border:1px solid var(--border);
+      padding:12px 18px;background:var(--surface);text-align:center}
+    .time-card .t{font-size:28px;font-weight:600;color:var(--text);letter-spacing:.04em}
+    .time-card .tz{font-size:10px;color:var(--muted);letter-spacing:.14em;margin-top:2px}
+
+    /* ── LOADING ── */
+    #loading-view{position:fixed;inset:0;bottom:32px;display:flex;
+      align-items:center;justify-content:center;background:var(--bg);
+      flex-direction:column;gap:16px}
+    .spinner{width:36px;height:36px;border:2px solid var(--border);
+      border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite}
+    .loading-text{font-size:11px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+
+    /* ── TICKER ── */
+    .ticker-wrap{position:fixed;bottom:0;left:0;right:0;height:32px;
+      background:var(--surface);border-top:1px solid var(--border);
+      overflow:hidden;display:flex;align-items:center;z-index:20}
+    .ticker-label{flex-shrink:0;background:var(--green);color:var(--bg);
+      font-size:11px;font-weight:600;letter-spacing:.1em;padding:0 14px;
+      height:100%;display:flex;align-items:center}
+    .ticker-track{flex:1;overflow:hidden;position:relative}
+    .ticker-inner{display:flex;align-items:center;white-space:nowrap;
+      animation:ticker 40s linear infinite;font-size:12px;letter-spacing:.06em}
+    .ticker-item{padding:0 28px;color:var(--text)}
+    .ticker-item .sym{color:var(--green);font-weight:600;margin-right:8px}
+    .ticker-item .up{color:var(--green)}
+    .ticker-item .dn{color:var(--red)}
+
+    @keyframes pulse {0%,100%{opacity:1}50%{opacity:.3}}
+    @keyframes blink {0%,100%{opacity:1}50%{opacity:0}}
+    @keyframes spin  {to{transform:rotate(360deg)}}
+    @keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+  </style>
+</head>
+<body>
+
+  <div id="loading-view">
+    <div class="spinner"></div>
+    <div class="loading-text">Checking for live stream…</div>
+  </div>
+
+  <div id="live-view" class="hidden">
+    <div class="hud">
+      <div class="hud-left">
+        <div class="live-badge"><div class="live-dot"></div> LIVE</div>
+        <div class="channel-name">tastylive</div>
+      </div>
+      <div class="hud-right">
+        <div class="clock">CT &nbsp;<span id="hud-clock">--:--:--</span></div>
+      </div>
+    </div>
+    <div id="player-wrap">
+      <iframe id="yt-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
+  </div>
+
+  <div id="offair-view" class="hidden">
+    <div class="offair-grid"></div>
+    <div class="time-card">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="t" id="offair-clock">--:--</div>
+      <div class="tz">CHICAGO · CT</div>
+    </div>
+    <div class="offair-content">
+      <div class="offair-logo">tastylive</div>
+      <div class="offair-status">No live broadcast right now &nbsp;<span class="blink">_</span></div>
+      <div class="schedule-block">
+        <div class="lbl">BROADCAST SCHEDULE</div>
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+        <div class="schedule-row"><span class="day">Monday – Friday</span><span class="time">7:00 AM – 5:00 PM CT</span></div>
+        <div class="schedule-row"><span class="day">Weekends</span><span class="time" style="color:var(--muted)">Off-Air</span></div>
+        <div class="schedule-row"><span class="day">Market Holidays</span><span class="time" style="color:var(--muted)">Off-Air</span></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);letter-spacing:.12em;">
+        tastylive.com &nbsp;·&nbsp; Options &amp; Futures &nbsp;·&nbsp; Live Every Trading Day
+      </div>
+    </div>
+  </div>
+
+  <div class="ticker-wrap">
+    <div class="ticker-label">MARKETS</div>
+    <div class="ticker-track">
+      <div class="ticker-inner" id="ticker"></div>
+    </div>
+  </div>
+
+  <script>
+    // Ticker
+    const td=[
+      {sym:'SPX', val:'5,842.01', chg:'+0.54%',dir:'up'},
+      {sym:'NDX', val:'20,913.77',chg:'+0.72%',dir:'up'},
+      {sym:'VIX', val:'16.42',    chg:'-1.20%',dir:'dn'},
+      {sym:'RUT', val:'2,091.56', chg:'+0.31%',dir:'up'},
+      {sym:'GLD', val:'3,312.40', chg:'+0.18%',dir:'up'},
+      {sym:'CL',  val:'62.88',    chg:'-0.43%',dir:'dn'},
+      {sym:'/ES', val:'5,860.25', chg:'+0.49%',dir:'up'},
+      {sym:'/NQ', val:'21,042.00',chg:'+0.67%',dir:'up'},
+      {sym:'DXY', val:'99.48',    chg:'-0.22%',dir:'dn'},
+      {sym:'AAPL',val:'212.33',   chg:'+0.61%',dir:'up'},
+      {sym:'NVDA',val:'111.42',   chg:'+1.34%',dir:'up'},
+      {sym:'TSLA',val:'287.91',   chg:'-0.88%',dir:'dn'},
+    ];
+    document.getElementById('ticker').innerHTML =
+      [...td,...td].map(d=>
+        `<span class="ticker-item"><span class="sym">${d.sym}</span>${d.val}&nbsp;<span class="${d.dir}">${d.chg}</span></span>`+
+        `<span class="ticker-item" style="color:var(--border)">·</span>`
+      ).join('');
+
+    // Clock
+    const getCT=()=>new Date(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}));
+    const pad=n=>String(n).padStart(2,'0');
+    const fmt=(d,full)=>{let h=d.getHours(),m=d.getMinutes(),s=d.getSeconds(),a=h>=12?'PM':'AM';
+      h=h%12||12; return full?`${pad(h)}:${pad(m)}:${pad(s)} ${a}`:`${h}:${pad(m)} ${a}`};
+    setInterval(()=>{
+      const n=getCT();
+      document.getElementById('hud-clock').textContent=fmt(n,true);
+      document.getElementById('offair-clock').textContent=fmt(n,false);
+    },1000);
+
+    // Views
+    const views=['loading-view','live-view','offair-view'];
+    const showView=id=>views.forEach(v=>document.getElementById(v).classList.toggle('hidden',v!==id));
+
+    // YouTube API
+    async function fetchLiveVideoId(){
+      if(!YT_API_KEY||YT_API_KEY==='AIzaSyBVaA3g96M5264PZ2gxmQ2lqH4RuEYDD-I'){
+        console.warn('Add your YouTube API key to this file.');return null;}
+      try{
+        const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${YT_CHANNEL_ID}&type=video&eventType=live&key=${YT_API_KEY}`);
+        const d=await r.json();
+        return d.items&&d.items.length?d.items[0].id.videoId:null;
+      }catch(e){console.error(e);return null;}
+    }
+
+    async function checkStream(){
+      showView('loading-view');
+      const id=await fetchLiveVideoId();
+      if(id){
+        document.getElementById('yt-iframe').src=
+          `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3`;
+        showView('live-view');
+      }else{
+        showView('offair-view');
+      }
+    }
+
+    checkStream();
+    setInterval(checkStream, REFRESH_MIN*60*1000);
+  </script>
+</body>
+</html>
